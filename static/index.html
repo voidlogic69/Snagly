@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snagly – save videos as MP4 or MP3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3efe6;--ink:#1b1a3a;--blue:#2d2bd6;--sun:#ffc533;--mute:#6b6a84;--card:#fff;--err:#c2271d}
+@media (prefers-color-scheme:dark){:root{--bg:#14132b;--ink:#f3efe6;--blue:#8c8bff;--sun:#ffc533;--mute:#a09fc0;--card:#1f1e40;--err:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,sans-serif;display:grid;place-items:center;padding:24px}
+main{width:100%;max-width:640px}
+h1{font-size:clamp(3rem,12vw,5.5rem);font-weight:800;letter-spacing:-.04em;margin:0;line-height:.95}
+h1 span{display:inline-block;background:var(--sun);color:#1b1a3a;padding:0 .12em;transform:rotate(-2deg)}
+p.lead{font-size:1.15rem;color:var(--mute);margin:16px 0 32px;max-width:46ch}
+.box{background:var(--card);border:2px solid var(--ink);border-radius:18px;padding:20px;box-shadow:8px 8px 0 var(--blue)}
+label{font-weight:600;display:block;margin-bottom:8px}
+input[type=url]{width:100%;font:inherit;padding:14px;border:2px solid var(--ink);border-radius:10px;background:var(--bg);color:var(--ink)}
+input:focus-visible,button:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+.row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.seg{display:flex;border:2px solid var(--ink);border-radius:10px;overflow:hidden}
+.seg input{position:absolute;opacity:0}
+.seg label{margin:0;padding:12px 20px;cursor:pointer;font-weight:600}
+.seg input:checked+label{background:var(--ink);color:var(--bg)}
+.seg input:focus-visible+label{outline:3px solid var(--blue);outline-offset:-3px}
+button{flex:1;min-width:140px;font:inherit;font-weight:800;font-size:1.05rem;padding:12px 20px;border:2px solid var(--ink);border-radius:10px;background:var(--sun);color:#1b1a3a;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+#preview{display:none;gap:14px;margin-top:18px;align-items:center}
+#preview img{width:110px;border-radius:8px;border:2px solid var(--ink)}
+#preview b{display:block}
+#status{margin-top:16px;min-height:1.4em;font-weight:600}
+#status.err{color:var(--err)}
+.sites{margin-top:28px;color:var(--mute);font-size:.95rem}
+@media (prefers-reduced-motion:no-preference){button{transition:transform .1s}button:active{transform:translate(2px,2px)}}
+</style>
+</head>
+<body>
+<main>
+  <h1><span>Snag</span>ly</h1>
+  <p class="lead">Paste a link, pick MP4 or MP3, and save the file.</p>
+  <div class="box">
+    <label for="url">Video link</label>
+    <input id="url" type="url" placeholder="https://" autocomplete="off">
+    <div id="preview"><img id="thumb" alt=""><div><b id="ptitle"></b><span id="pmeta"></span></div></div>
+    <div class="row">
+      <div class="seg" role="radiogroup" aria-label="Format">
+        <input type="radio" name="f" id="f1" value="mp4" checked><label for="f1">MP4 video</label>
+        <input type="radio" name="f" id="f2" value="mp3"><label for="f2">MP3 audio</label>
+      </div>
+      <button id="go">Download</button>
+    </div>
+    <div id="status" role="status"></div>
+  </div>
+  <p class="sites">Works with YouTube, Reddit, X, Instagram and Pinterest. Only save content you own or have permission to download.</p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const status = (t, err) => { $('status').textContent = t; $('status').className = err ? 'err' : ''; };
+let timer;
+$('url').addEventListener('input', () => {
+  clearTimeout(timer); $('preview').style.display = 'none';
+  const url = $('url').value.trim();
+  if (!url.startsWith('http')) return;
+  timer = setTimeout(async () => {
+    try {
+      const r = await fetch('/api/info', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})});
+      const d = await r.json();
+      if (!r.ok) return status(d.error, true);
+      status('');
+      $('ptitle').textContent = d.title || 'Untitled';
+      $('pmeta').textContent = d.uploader || '';
+      $('thumb').src = d.thumbnail || '';
+      $('preview').style.display = 'flex';
+    } catch { status('Can’t reach the Snagly server. Is app.py running?', true); }
+  }, 600);
+});
+$('go').addEventListener('click', async () => {
+  const url = $('url').value.trim();
+  const format = document.querySelector('input[name=f]:checked').value;
+  if (!url) return status('Paste a video link first.', true);
+  $('go').disabled = true; status('Downloading… this can take a minute.');
+  try {
+    const r = await fetch('/api/download', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url, format})});
+    if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(cd);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = m ? decodeURIComponent(m[1]) : 'snagly.' + format;
+    a.click(); URL.revokeObjectURL(a.href);
+    status('Saved.');
+  } catch (e) { status(e.message || 'Download failed.', true); }
+  $('go').disabled = false;
+});
+</script>
+</body>
+</html>
